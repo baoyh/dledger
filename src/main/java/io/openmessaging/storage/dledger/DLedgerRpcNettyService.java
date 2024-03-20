@@ -53,6 +53,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
+ * DLedger Server(节点)之间的网络通信
+ *
  * A netty implementation of DLedgerRpcService. It should be bi-directional, which means it implements both
  * DLedgerProtocol and DLedgerProtocolHandler.
  */

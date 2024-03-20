@@ -46,6 +46,11 @@ public class MemberState {
     private final String group;
     private final String selfId;
     private final String peers;
+
+    /**
+     * 在 raft 协议中，节点的状态默认为 follower，DLedger 的实现从candidate 开始
+     * 一开始，集群内的所有节点都会尝试发起投票，这样第一轮要达成选举几乎不太可能
+     */
     private volatile Role role = CANDIDATE;
     private volatile String leaderId;
     private volatile long currTerm = 0;

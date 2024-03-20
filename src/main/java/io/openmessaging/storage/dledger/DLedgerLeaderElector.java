@@ -39,33 +39,102 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Leader 选举类
+ */
 public class DLedgerLeaderElector {
 
     private static Logger logger = LoggerFactory.getLogger(DLedgerLeaderElector.class);
 
+    /**
+     * 随机数生成器，对应 raft 协议中选举超时时间是一随机数
+     */
     private Random random = new Random();
+
+    /**
+     * 配置参数
+     */
     private DLedgerConfig dLedgerConfig;
+
+    /**
+     * 节点状态机
+     */
     private final MemberState memberState;
+
+    /**
+     * rpc 服务，实现向集群内的节点发送心跳包、投票的 RPC 实现
+     */
     private DLedgerRpcService dLedgerRpcService;
 
-    //as a server handler
-    //record the last leader state
+    /**
+     * 上次收到心跳包的时间戳
+     * as a server handler
+     * record the last leader state
+     */
     private volatile long lastLeaderHeartBeatTime = -1;
+
+    /**
+     * 上次发送心跳包的时间戳
+     */
     private volatile long lastSendHeartBeatTime = -1;
+
+    /**
+     * 上次成功收到心跳包的时间戳
+     */
     private volatile long lastSuccHeartBeatTime = -1;
+
+    /**
+     * 一个心跳包的周期，默认为 2s
+     */
     private int heartBeatTimeIntervalMs = 2000;
+
+    /**
+     * 允许最大的 N 个心跳周期内未收到心跳包，状态为 Follower 的节点只有超过
+     * maxHeartBeatLeak * heartBeatTimeIntervalMs 的时间内未收到主节点的心跳包，
+     * 才会重新进入 Candidate 状态，重新下一轮的选举
+     */
     private int maxHeartBeatLeak = 3;
-    //as a client
+
+    /**
+     * 下一个发送投票的时间点
+     * as a client
+     */
     private long nextTimeToRequestVote = -1;
+
+    /**
+     * 是否应该立即发起投票
+     * 当收到从主节点的心跳包并且当前状态机的轮次大于主节点的轮次，说明集群中 Leader 的投票轮次小于从节点的轮次，应该立即发起新的投票
+     */
     private volatile boolean needIncreaseTermImmediately = false;
+
+    /**
+     * 最小的发送投票间隔时间，默认为 300ms
+     */
     private int minVoteIntervalMs = 300;
+
+    /**
+     * 最大的发送投票的间隔，默认为 1000ms
+     */
     private int maxVoteIntervalMs = 1000;
 
+    /**
+     * 注册的节点状态处理器，通过 addRoleChangeHandler 方法添加
+     */
     private List<RoleChangeHandler> roleChangeHandlers = new ArrayList<>();
 
+    /**
+     * 上一次投票的结果
+     */
     private VoteResponse.ParseResult lastParseResult = VoteResponse.ParseResult.WAIT_TO_REVOTE;
+
+    /**
+     * 上一次投票的开销
+     */
     private long lastVoteCost = 0L;
 
+    /**
+     * 状态机管理器
+     */
     private StateMaintainer stateMaintainer = new StateMaintainer("StateMaintainer", logger);
 
     private final TakeLeadershipTask takeLeadershipTask = new TakeLeadershipTask();
@@ -92,6 +161,9 @@ public class DLedgerLeaderElector {
         }
     }
 
+    /**
+     * 刷新配置
+     */
     private void refreshIntervals(DLedgerConfig dLedgerConfig) {
         this.heartBeatTimeIntervalMs = dLedgerConfig.getHeartBeatTimeIntervalMs();
         this.maxHeartBeatLeak = dLedgerConfig.getMaxHeartBeatLeak();
@@ -390,16 +462,21 @@ public class DLedgerLeaderElector {
 
     private void maintainAsCandidate() throws Exception {
         //for candidate
+        // 如果当前时间小于该值，说明计时器未过期，此时无需发起投票
         if (System.currentTimeMillis() < nextTimeToRequestVote && !needIncreaseTermImmediately) {
             return;
         }
+        // 投票轮次
         long term;
+        // leader 节点的投票轮次
         long ledgerEndTerm;
+        // 当前日志的最大序列，即下一条日志的开始 index
         long ledgerEndIndex;
         synchronized (memberState) {
             if (!memberState.isCandidate()) {
                 return;
             }
+            // 如果上一次的投票结果为待下一次投票或应该立即开启投票，根据当前状态机获取下一轮的投票轮次
             if (lastParseResult == VoteResponse.ParseResult.WAIT_TO_VOTE_NEXT || needIncreaseTermImmediately) {
                 long prevTerm = memberState.currTerm();
                 term = memberState.nextTerm();
@@ -418,13 +495,21 @@ public class DLedgerLeaderElector {
         }
 
         long startVoteTimeMs = System.currentTimeMillis();
+        // 向集群内的其他节点发起投票，并返回投票结果列表
         final List<CompletableFuture<VoteResponse>> quorumVoteResponses = voteForQuorumResponses(term, ledgerEndTerm, ledgerEndIndex);
+        // 已知的最大投票轮次
         final AtomicLong knownMaxTermInGroup = new AtomicLong(term);
+        // 总的节点数
         final AtomicInteger allNum = new AtomicInteger(0);
+        // 有效的节点数
         final AtomicInteger validNum = new AtomicInteger(0);
+        // 投票给当前节点的数
         final AtomicInteger acceptedNum = new AtomicInteger(0);
+        // 未准备投票的节点数量，如果对端节点的投票轮次小于发起投票的轮次，则认为对端未准备好，对端节点使用本次的轮次进入 Candidate 状态
         final AtomicInteger notReadyTermNum = new AtomicInteger(0);
+        // 发起投票的节点的 ledgerEndTerm 小于对端节点的个数
         final AtomicInteger biggerLedgerNum = new AtomicInteger(0);
+        // 是否已经存在 Leader
         final AtomicBoolean alreadyHasLeader = new AtomicBoolean(false);
 
         CountDownLatch voteLatch = new CountDownLatch(1);
@@ -441,25 +526,33 @@ public class DLedgerLeaderElector {
                     synchronized (knownMaxTermInGroup) {
                         switch (x.getVoteResult()) {
                             case ACCEPT:
+                                // 只有得到的赞成票超过集群节点数量的一半才能成为 Leader
                                 acceptedNum.incrementAndGet();
                                 break;
-                            case REJECT_ALREADY_VOTED:
+                            case REJECT_ALREADY_VOTED:  // 拒绝票，原因是已经投了其他节点的票
                             case REJECT_TAKING_LEADERSHIP:
                                 break;
                             case REJECT_ALREADY_HAS_LEADER:
+                                // 拒绝票，原因是因为集群中已经存在 Leader 了。alreadyHasLeader 设置为 true
+                                // 无需在判断其他投票结果了，结束本轮投票
                                 alreadyHasLeader.compareAndSet(false, true);
                                 break;
                             case REJECT_TERM_SMALL_THAN_LEDGER:
+                                // 拒绝票，如果自己维护的 term 小于远端维护的 ledgerEndTerm，则返回该结果
+                                // 如果对端的 team 大于自己的 team，需要记录对端最大的投票轮次，以便更新自己的投票轮次
                             case REJECT_EXPIRED_VOTE_TERM:
+                                // 拒绝票，如果自己维护的 term 小于远端维护的 term，更新自己维护的投票轮次
                                 if (x.getTerm() > knownMaxTermInGroup.get()) {
                                     knownMaxTermInGroup.set(x.getTerm());
                                 }
                                 break;
                             case REJECT_EXPIRED_LEDGER_TERM:
                             case REJECT_SMALL_LEDGER_END_INDEX:
+                                // 拒绝票，如果对端的 ledgerTeam 与自己维护的 ledgerTeam 相等，但是自己维护的 dledgerEndIndex 小于对端维护的值，返回该值，增加 biggerLedgerNum 计数器的值
                                 biggerLedgerNum.incrementAndGet();
                                 break;
                             case REJECT_TERM_NOT_READY:
+                                // 拒绝票，对端的投票轮次小于自己的 team，则认为对端还未准备好投票，对端使用自己的投票轮次，使自己进入到 Candidate 状态
                                 notReadyTermNum.incrementAndGet();
                                 break;
                             default:
@@ -467,6 +560,8 @@ public class DLedgerLeaderElector {
 
                         }
                     }
+                    // 如果已经存在 leader, 或者投票给自己的数已经超过半数则不再做投票结果判断
+                    // acceptedNum.get() + notReadyTermNum.get()) 的判断需要打个疑问
                     if (alreadyHasLeader.get()
                         || memberState.isQuorum(acceptedNum.get())
                         || memberState.isQuorum(acceptedNum.get() + notReadyTermNum.get())) {
@@ -485,6 +580,7 @@ public class DLedgerLeaderElector {
         }
 
         try {
+            // 等待收集投票结果，并设置超时时间
             voteLatch.await(2000 + random.nextInt(maxVoteIntervalMs), TimeUnit.MILLISECONDS);
         } catch (Throwable ignore) {
 
@@ -532,10 +628,14 @@ public class DLedgerLeaderElector {
      */
     private void maintainState() throws Exception {
         if (memberState.isLeader()) {
+            // 发送心跳给 followers
             maintainAsLeader();
         } else if (memberState.isFollower()) {
+            // 接受心跳, 当一定时间内没有收到心跳时成为 candidate
             maintainAsFollower();
         } else {
+            // 发起投票, 尝试选择自己为主节点，选举成功后，不会存在该状态下的节点
+            // 默认为 candidate 状态
             maintainAsCandidate();
         }
     }
@@ -696,6 +796,7 @@ public class DLedgerLeaderElector {
         @Override public void doWork() {
             try {
                 if (DLedgerLeaderElector.this.dLedgerConfig.isEnableLeaderElector()) {
+                    //重置定时器，然后维护状态，进行投票选举等流程
                     DLedgerLeaderElector.this.refreshIntervals(dLedgerConfig);
                     DLedgerLeaderElector.this.maintainState();
                 }

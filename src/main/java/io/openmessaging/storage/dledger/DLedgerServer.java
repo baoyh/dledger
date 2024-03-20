@@ -58,6 +58,9 @@ import java.util.concurrent.CompletableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Dledger Server，Dledger 节点的封装类
+ */
 public class DLedgerServer implements DLedgerProtocolHander {
 
     private static Logger logger = LoggerFactory.getLogger(DLedgerServer.class);
