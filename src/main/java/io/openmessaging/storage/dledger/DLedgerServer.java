@@ -119,6 +119,9 @@ public class DLedgerServer implements DLedgerProtocolHander {
         return memberState;
     }
 
+    /**
+     * 处理心跳
+     */
     @Override public CompletableFuture<HeartBeatResponse> handleHeartBeat(HeartBeatRequest request) throws Exception {
         try {
 
@@ -135,6 +138,9 @@ public class DLedgerServer implements DLedgerProtocolHander {
         }
     }
 
+    /**
+     * 处理投票请求
+     */
     @Override public CompletableFuture<VoteResponse> handleVote(VoteRequest request) throws Exception {
         try {
             PreConditions.check(memberState.getSelfId().equals(request.getRemoteId()), DLedgerResponseCode.UNKNOWN_MEMBER, "%s != %s", request.getRemoteId(), memberState.getSelfId());

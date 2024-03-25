@@ -58,9 +58,16 @@ public class MemberState {
     private volatile long ledgerEndIndex = -1;
     private volatile long ledgerEndTerm = -1;
     private long knownMaxTermInGroup = -1;
-    private Map<String, String> peerMap = new HashMap<>();
+
+    /**
+     * 维护集群内的所有节点
+     */
+    private Map<String /*id*/, String /*address*/> peerMap = new HashMap<>();
     private Map<String, Boolean> peersLiveTable = new ConcurrentHashMap<>();
 
+    /**
+     * 受让人, 这里指代投票对象的 id
+     */
     private volatile String transferee;
     private volatile long termToTakeLeadership = -1;
 
@@ -114,12 +121,17 @@ public class MemberState {
         return currTerm;
     }
 
+    /**
+     * 当前投票的节点 id
+     * @return
+     */
     public String currVoteFor() {
         return currVoteFor;
     }
 
     public synchronized void setCurrVoteFor(String currVoteFor) {
         this.currVoteFor = currVoteFor;
+        // 持久化 term 数据
         persistTerm();
     }
 
@@ -214,6 +226,9 @@ public class MemberState {
         return role == CANDIDATE;
     }
 
+    /**
+     * 是否是大多数
+     */
     public boolean isQuorum(int num) {
         return num >= ((peerSize() / 2) + 1);
     }

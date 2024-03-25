@@ -174,11 +174,13 @@ public class DLedgerLeaderElector {
     public CompletableFuture<HeartBeatResponse> handleHeartBeat(HeartBeatRequest request) throws Exception {
 
         if (!memberState.isPeerMember(request.getLeaderId())) {
+            // 不存在的节点
             logger.warn("[BUG] [HandleHeartBeat] remoteId={} is an unknown member", request.getLeaderId());
             return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.UNKNOWN_MEMBER.getCode()));
         }
 
         if (memberState.getSelfId().equals(request.getLeaderId())) {
+            // 当前节点为 leader
             logger.warn("[BUG] [HandleHeartBeat] selfId={} but remoteId={}", memberState.getSelfId(), request.getLeaderId());
             return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.UNEXPECTED_MEMBER.getCode()));
         }
@@ -187,24 +189,29 @@ public class DLedgerLeaderElector {
             return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.EXPIRED_TERM.getCode()));
         } else if (request.getTerm() == memberState.currTerm()) {
             if (request.getLeaderId().equals(memberState.getLeaderId())) {
+                // 返回心跳
                 lastLeaderHeartBeatTime = System.currentTimeMillis();
                 return CompletableFuture.completedFuture(new HeartBeatResponse());
             }
         }
 
+        // 处理异常情况
         //abnormal case
         //hold the lock to get the latest term and leaderId
         synchronized (memberState) {
             if (request.getTerm() < memberState.currTerm()) {
+                // term 过小
                 return CompletableFuture.completedFuture(new HeartBeatResponse().term(memberState.currTerm()).code(DLedgerResponseCode.EXPIRED_TERM.getCode()));
             } else if (request.getTerm() == memberState.currTerm()) {
                 if (memberState.getLeaderId() == null) {
+                    // 未指定 leader, 重新设置 leader 后再返回心跳
                     changeRoleToFollower(request.getTerm(), request.getLeaderId());
                     return CompletableFuture.completedFuture(new HeartBeatResponse());
                 } else if (request.getLeaderId().equals(memberState.getLeaderId())) {
                     lastLeaderHeartBeatTime = System.currentTimeMillis();
                     return CompletableFuture.completedFuture(new HeartBeatResponse());
                 } else {
+                    // 如果该节点的 leader 和发送心跳的节点不是同一个
                     //this should not happen, but if happened
                     logger.error("[{}][BUG] currTerm {} has leader {}, but received leader {}", memberState.getSelfId(), memberState.currTerm(), memberState.getLeaderId(), request.getLeaderId());
                     return CompletableFuture.completedFuture(new HeartBeatResponse().code(DLedgerResponseCode.INCONSISTENT_LEADER.getCode()));
@@ -212,6 +219,7 @@ public class DLedgerLeaderElector {
             } else {
                 //To make it simple, for larger term, do not change to follower immediately
                 //first change to candidate, and notify the state-maintainer thread
+                // 请求的节点比当前的大
                 changeRoleToCandidate(request.getTerm());
                 needIncreaseTermImmediately = true;
                 //TOOD notify
@@ -264,35 +272,48 @@ public class DLedgerLeaderElector {
         //hold the lock to get the latest term, leaderId, ledgerEndIndex
         synchronized (memberState) {
             if (!memberState.isPeerMember(request.getLeaderId())) {
+                // 如果不在集群中, 返回 REJECT_UNKNOWN_LEADER
                 logger.warn("[BUG] [HandleVote] remoteId={} is an unknown member", request.getLeaderId());
                 return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_UNKNOWN_LEADER));
             }
             if (!self && memberState.getSelfId().equals(request.getLeaderId())) {
+                // 发起投票的节点 id 和当前节点是同一个的情况, 返回 REJECT_UNEXPECTED_LEADER
                 logger.warn("[BUG] [HandleVote] selfId={} but remoteId={}", memberState.getSelfId(), request.getLeaderId());
                 return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_UNEXPECTED_LEADER));
             }
 
+            // 这里主要是判断日志的复制进度
             if (request.getLedgerEndTerm() < memberState.getLedgerEndTerm()) {
+                // 当前的 end_term 大于发起请求的 end_term, 拒绝, 返回 REJECT_EXPIRED_LEDGER_TERM
+                // 如果请求节点的 ledgerEndTerm, 小于当前节点的 ledgerEndTerm 则拒绝，其原因是请求节点的日志复制进度比当前节点低，这种情况是不能成为主节点的。
                 return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_EXPIRED_LEDGER_TERM));
             } else if (request.getLedgerEndTerm() == memberState.getLedgerEndTerm() && request.getLedgerEndIndex() < memberState.getLedgerEndIndex()) {
+                // 当前的 end_index 大于发起请求的 end_index, 拒绝, 返回 REJECT_SMALL_LEDGER_END_INDEX
+                // 如果 ledgerEndTerm 相等，但是 ledgerEndIndex 比当前节点小，则拒绝，原因与上一条相同
                 return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_SMALL_LEDGER_END_INDEX));
             }
 
             if (request.getTerm() < memberState.currTerm()) {
+                // 当前的 term 大于发起请求的 term, 拒绝, 返回 REJECT_EXPIRED_VOTE_TERM
                 return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_EXPIRED_VOTE_TERM));
             } else if (request.getTerm() == memberState.currTerm()) {
                 if (memberState.currVoteFor() == null) {
+                    // 还未投票
                     //let it go
                 } else if (memberState.currVoteFor().equals(request.getLeaderId())) {
+                    // 已经投票给了请求的节点, 这里不明白为何不直接返回
                     //repeat just let it go
                 } else {
                     if (memberState.getLeaderId() != null) {
+                        // 如果已经存在 leader, 返回 REJECT_ALREADY_HAS_LEADER
                         return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_ALREADY_HAS_LEADER));
                     } else {
+                        // 如果已经投票给了其他节点, 返回 REJECT_ALREADY_VOTED
                         return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_ALREADY_VOTED));
                     }
                 }
             } else {
+                // 请求的 term > 当前 term 的情况, 返回 REJECT_TERM_NOT_READY
                 //stepped down by larger term
                 changeRoleToCandidate(request.getTerm());
                 needIncreaseTermImmediately = true;
@@ -314,7 +335,9 @@ public class DLedgerLeaderElector {
     }
 
     private void sendHeartbeats(long term, String leaderId) throws Exception {
+        // 默认先算上自己
         final AtomicInteger allNum = new AtomicInteger(1);
+        // 默认先算上自己
         final AtomicInteger succNum = new AtomicInteger(1);
         final AtomicInteger notReadyNum = new AtomicInteger(0);
         final AtomicLong maxTerm = new AtomicLong(-1);
@@ -323,6 +346,7 @@ public class DLedgerLeaderElector {
         long startHeartbeatTimeMs = System.currentTimeMillis();
         for (String id : memberState.getPeerMap().keySet()) {
             if (memberState.getSelfId().equals(id)) {
+                // 无需向自己发送心跳
                 continue;
             }
             HeartBeatRequest heartBeatRequest = new HeartBeatRequest();
@@ -331,10 +355,12 @@ public class DLedgerLeaderElector {
             heartBeatRequest.setRemoteId(id);
             heartBeatRequest.setLeaderId(leaderId);
             heartBeatRequest.setTerm(term);
+            // 通过 netty 发送心跳, 异步请求
             CompletableFuture<HeartBeatResponse> future = dLedgerRpcService.heartBeat(heartBeatRequest);
             future.whenComplete((HeartBeatResponse x, Throwable ex) -> {
                 try {
                     if (ex != null) {
+                        // 抛出异常, 认为该节点不可用
                         memberState.getPeersLiveTable().put(id, Boolean.FALSE);
                         throw ex;
                     }
@@ -343,12 +369,15 @@ public class DLedgerLeaderElector {
                             succNum.incrementAndGet();
                             break;
                         case EXPIRED_TERM:
+                            // 更新 term
                             maxTerm.set(x.getTerm());
                             break;
                         case INCONSISTENT_LEADER:
+                            // 不一致的 leader
                             inconsistLeader.compareAndSet(false, true);
                             break;
                         case TERM_NOT_READY:
+                            // 从节点未准备好
                             notReadyNum.incrementAndGet();
                             break;
                         default:
@@ -360,6 +389,7 @@ public class DLedgerLeaderElector {
                     else
                         memberState.getPeersLiveTable().put(id, Boolean.TRUE);
 
+                    // 如果有过半的节点应答, 表示集群依然可用
                     if (memberState.isQuorum(succNum.get())
                         || memberState.isQuorum(succNum.get() + notReadyNum.get())) {
                         beatLatch.countDown();
@@ -376,23 +406,30 @@ public class DLedgerLeaderElector {
         }
         beatLatch.await(heartBeatTimeIntervalMs, TimeUnit.MILLISECONDS);
         if (memberState.isQuorum(succNum.get())) {
+            // 二次判断, 更新上次接收的
             lastSuccHeartBeatTime = System.currentTimeMillis();
         } else {
+            // 处理节点已接受完但依然不过半的情况
             logger.info("[{}] Parse heartbeat responses in cost={} term={} allNum={} succNum={} notReadyNum={} inconsistLeader={} maxTerm={} peerSize={} lastSuccHeartBeatTime={}",
                 memberState.getSelfId(), DLedgerUtils.elapsed(startHeartbeatTimeMs), term, allNum.get(), succNum.get(), notReadyNum.get(), inconsistLeader.get(), maxTerm.get(), memberState.peerSize(), new Timestamp(lastSuccHeartBeatTime));
             if (memberState.isQuorum(succNum.get() + notReadyNum.get())) {
                 lastSendHeartBeatTime = -1;
             } else if (maxTerm.get() > term) {
+                // 如果接收到的 term 大于自己最大的 term, 说明存在新的 leader 或者正在进行投票
+                // 此类情况往往是此节点不可用后重启导致的
                 changeRoleToCandidate(maxTerm.get());
             } else if (inconsistLeader.get()) {
+                // 存在其他的 leader
                 changeRoleToCandidate(term);
             } else if (DLedgerUtils.elapsed(lastSuccHeartBeatTime) > maxHeartBeatLeak * heartBeatTimeIntervalMs) {
+                // 这种情况表示 follow 已经长时间没有收到心跳, 大概率已经重新发起了投票
                 changeRoleToCandidate(term);
             }
         }
     }
 
     private void maintainAsLeader() throws Exception {
+        // 如果当前时间-上次发送心跳时间 > 一个心跳包的周期, 需要再此发送心跳
         if (DLedgerUtils.elapsed(lastSendHeartBeatTime) > heartBeatTimeIntervalMs) {
             long term;
             String leaderId;
@@ -403,8 +440,10 @@ public class DLedgerLeaderElector {
                 }
                 term = memberState.currTerm();
                 leaderId = memberState.getLeaderId();
+                // 重置上次发送心跳时间
                 lastSendHeartBeatTime = System.currentTimeMillis();
             }
+            // 向集群内的所有节点发送心跳包
             sendHeartbeats(term, leaderId);
         }
     }
@@ -414,12 +453,19 @@ public class DLedgerLeaderElector {
             synchronized (memberState) {
                 if (memberState.isFollower() && (DLedgerUtils.elapsed(lastLeaderHeartBeatTime) > maxHeartBeatLeak * heartBeatTimeIntervalMs)) {
                     logger.info("[{}][HeartBeatTimeOut] lastLeaderHeartBeatTime: {} heartBeatTimeIntervalMs: {} lastLeader={}", memberState.getSelfId(), new Timestamp(lastLeaderHeartBeatTime), heartBeatTimeIntervalMs, memberState.getLeaderId());
+                    // 如果长时间没有收到心跳, 变更为 candidate
                     changeRoleToCandidate(memberState.currTerm());
                 }
             }
         }
     }
 
+    /**
+     *
+     * @param term  发起投票的节点当前的投票轮次
+     * @param ledgerEndTerm   发起投票节点维护的已知的最大投票轮次
+     * @param ledgerEndIndex  发起投票节点维护的已知的最大日志条目索引
+     */
     private List<CompletableFuture<VoteResponse>> voteForQuorumResponses(long term, long ledgerEndTerm,
         long ledgerEndIndex) throws Exception {
         List<CompletableFuture<VoteResponse>> responses = new ArrayList<>();
@@ -433,9 +479,11 @@ public class DLedgerLeaderElector {
             voteRequest.setRemoteId(id);
             CompletableFuture<VoteResponse> voteResponse;
             if (memberState.getSelfId().equals(id)) {
+                // 给自己投票
                 voteResponse = handleVote(voteRequest, true);
             } else {
                 //async
+                // 通过 Netty 向其他节点发起投票
                 voteResponse = dLedgerRpcService.vote(voteRequest);
             }
             responses.add(voteResponse);
@@ -586,24 +634,36 @@ public class DLedgerLeaderElector {
 
         }
 
+        // 投票花费时间
         lastVoteCost = DLedgerUtils.elapsed(startVoteTimeMs);
         VoteResponse.ParseResult parseResult;
         if (knownMaxTermInGroup.get() > term) {
+            // 如果已知的最大轮数大于当前轮数, 返回 WAIT_TO_VOTE_NEXT
             parseResult = VoteResponse.ParseResult.WAIT_TO_VOTE_NEXT;
+            // 重置 nextTimeToRequestVote 为当前时间+最小的发送投票间隔时间+随机数
             nextTimeToRequestVote = getNextTimeToRequestVote();
+            // 设置 term 为 knownMaxTermInGroup
             changeRoleToCandidate(knownMaxTermInGroup.get());
         } else if (alreadyHasLeader.get()) {
+            // 如果已经存在 leader, 返回 WAIT_TO_REVOTE
             parseResult = VoteResponse.ParseResult.WAIT_TO_REVOTE;
+            // 设置 nextTimeToRequestVote 为当前时间+最小的发送投票间隔时间+随机数+心跳包的周期 * 3
+            // 这意味着只有当心调有3次以上没收到时才会进行投票选举
             nextTimeToRequestVote = getNextTimeToRequestVote() + heartBeatTimeIntervalMs * maxHeartBeatLeak;
         } else if (!memberState.isQuorum(validNum.get())) {
+            // 如果投票数没有过半, 返回 WAIT_TO_REVOTE
             parseResult = VoteResponse.ParseResult.WAIT_TO_REVOTE;
+            // 重置 nextTimeToRequestVote 为当前时间+最小的发送投票间隔时间+随机数
             nextTimeToRequestVote = getNextTimeToRequestVote();
         } else if (!memberState.isQuorum(validNum.get() - biggerLedgerNum.get())) {
+            // 同上
             parseResult = VoteResponse.ParseResult.WAIT_TO_REVOTE;
             nextTimeToRequestVote = getNextTimeToRequestVote() + maxVoteIntervalMs;
         } else if (memberState.isQuorum(acceptedNum.get())) {
+            // 如果满足过半的条件, 返回 PASSED
             parseResult = VoteResponse.ParseResult.PASSED;
         } else if (memberState.isQuorum(acceptedNum.get() + notReadyTermNum.get())) {
+            // 如果已接受数+未准备投票的节点数量过半,返回 REVOTE_IMMEDIATELY
             parseResult = VoteResponse.ParseResult.REVOTE_IMMEDIATELY;
         } else {
             parseResult = VoteResponse.ParseResult.WAIT_TO_VOTE_NEXT;
@@ -615,6 +675,7 @@ public class DLedgerLeaderElector {
 
         if (parseResult == VoteResponse.ParseResult.PASSED) {
             logger.info("[{}] [VOTE_RESULT] has been elected to be the leader in term {}", memberState.getSelfId(), term);
+            // 将此节点升级为 leader
             changeRoleToLeader(term);
         }
     }
