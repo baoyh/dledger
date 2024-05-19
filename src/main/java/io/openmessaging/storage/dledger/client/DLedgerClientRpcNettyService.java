@@ -39,6 +39,9 @@ public class DLedgerClientRpcNettyService extends DLedgerClientRpcService {
         this.remotingClient = new NettyRemotingClient(new NettyClientConfig(), null);
     }
 
+    /**
+     * client 发送 entry
+     */
     @Override
     public CompletableFuture<AppendEntryResponse> append(AppendEntryRequest request) throws Exception {
         RemotingCommand wrapperRequest = RemotingCommand.createRequestCommand(DLedgerRequestCode.APPEND.getCode(), null);

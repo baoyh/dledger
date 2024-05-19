@@ -25,24 +25,51 @@ public abstract class DLedgerStore {
         return null;
     }
 
+    /**
+     * 向主节点追加日志(数据)
+     */
     public abstract DLedgerEntry appendAsLeader(DLedgerEntry entry);
 
+    /**
+     * 向从节点同步日志
+     */
     public abstract DLedgerEntry appendAsFollower(DLedgerEntry entry, long leaderTerm, String leaderId);
 
+    /**
+     * 根据日志下标查找日志
+     */
     public abstract DLedgerEntry get(Long index);
 
+    /**
+     * 获取已提交的下标
+     */
     public abstract long getCommittedIndex();
 
+    /**
+     * 更新 committedIndex 的值
+     */
     public void updateCommittedIndex(long term, long committedIndex) {
 
     }
 
+    /**
+     * 获取 Leader 当前最大的投票轮次
+     */
     public abstract long getLedgerEndTerm();
 
+    /**
+     * 获取 Leader 下一条日志写入的下标
+     */
     public abstract long getLedgerEndIndex();
 
+    /**
+     * 获取 Leader 第一条消息的下标
+     */
     public abstract long getLedgerBeginIndex();
 
+    /**
+     * 更新 Leader 维护的 ledgerEndIndex 和 ledgerEndTerm
+     */
     protected void updateLedgerEndIndexAndTerm() {
         if (getMemberState() != null) {
             getMemberState().updateLedgerIndexAndTerm(getLedgerEndIndex(), getLedgerEndTerm());
@@ -53,6 +80,9 @@ public abstract class DLedgerStore {
 
     }
 
+    /**
+     * 删除日志
+     */
     public long truncate(DLedgerEntry entry, long leaderTerm, String leaderId) {
         return -1;
     }

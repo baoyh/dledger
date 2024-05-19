@@ -316,7 +316,9 @@ public class DLedgerLeaderElector {
                     }
                 }
             } else {
+                System.out.println(memberState.getSelfId() + " term " + memberState.currTerm() + " less than " + request.getLeaderId() + " term " + request.getTerm());
                 // 请求的 term > 当前 term 的情况, 返回 REJECT_TERM_NOT_READY
+                // 这里不明白为何不直接把票投给 request
                 //stepped down by larger term
                 changeRoleToCandidate(request.getTerm());
                 needIncreaseTermImmediately = true;
@@ -332,6 +334,7 @@ public class DLedgerLeaderElector {
                 return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.REJECT_TAKING_LEADERSHIP));
             }
 
+            System.out.println(memberState.getSelfId() + " vote for " + request.getLeaderId());
             memberState.setCurrVoteFor(request.getLeaderId());
             return CompletableFuture.completedFuture(new VoteResponse(request).term(memberState.currTerm()).voteResult(VoteResponse.RESULT.ACCEPT));
         }
@@ -530,10 +533,12 @@ public class DLedgerLeaderElector {
             if (lastParseResult == VoteResponse.ParseResult.WAIT_TO_VOTE_NEXT || needIncreaseTermImmediately) {
                 long prevTerm = memberState.currTerm();
                 term = memberState.nextTerm();
+                System.out.println(memberState.getSelfId() + " next term " + term);
                 logger.info("{}_[INCREASE_TERM] from {} to {}", memberState.getSelfId(), prevTerm, term);
                 lastParseResult = VoteResponse.ParseResult.WAIT_TO_REVOTE;
             } else {
                 term = memberState.currTerm();
+                System.out.println(memberState.getSelfId() + " term " + term);
             }
             ledgerEndIndex = memberState.getLedgerEndIndex();
             ledgerEndTerm = memberState.getLedgerEndTerm();
@@ -581,7 +586,7 @@ public class DLedgerLeaderElector {
                                 acceptedNum.incrementAndGet();
                                 break;
                             case REJECT_ALREADY_VOTED:  // 拒绝票，原因是已经投了其他节点的票
-                                System.out.println(x.getRemoteId() + ": REJECT_ALREADY_VOTED");
+                                System.out.println(x.getRemoteId() + " REJECT_ALREADY_VOTED TO " + memberState.getSelfId());
                             case REJECT_TAKING_LEADERSHIP:
                                 break;
                             case REJECT_ALREADY_HAS_LEADER:

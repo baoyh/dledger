@@ -123,6 +123,7 @@ public class AppendAndGetTest extends ServerTestHarness {
             Assertions.assertEquals(i, getEntriesResponse.getEntries().get(0).getIndex());
             Assertions.assertArrayEquals(("HelloThreeServerInFile" + i).getBytes(), getEntriesResponse.getEntries().get(0).getBody());
         }
+//        Thread.sleep(10000000);
     }
 
     @Test

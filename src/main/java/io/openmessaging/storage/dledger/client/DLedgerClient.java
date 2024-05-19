@@ -54,6 +54,9 @@ public class DLedgerClient {
         leaderId = peerMap.keySet().iterator().next();
     }
 
+    /**
+     * 客户端发送日志的入口
+     */
     public AppendEntryResponse append(byte[] body) {
         try {
             waitOnUpdatingMetadata(1500, false);

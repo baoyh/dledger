@@ -189,7 +189,13 @@ public class MmapFileList {
         return preAppend(len, true);
     }
 
+    /**
+     * 返回待写入日志的起始物理偏移量
+     * @param len 需要申请的长度
+     * @param useBlank 是否需要填充，默认为 true
+     */
     public long preAppend(int len, boolean useBlank) {
+        // 获取最后一个文件，即获取当前正在写的文件
         MmapFile mappedFile = getLastMappedFile();
         if (null == mappedFile || mappedFile.isFull()) {
             mappedFile = getLastMappedFile(0);
@@ -199,13 +205,17 @@ public class MmapFileList {
             return -1;
         }
         int blank = useBlank ? MIN_BLANK_LEN : 0;
+        // 如果需要申请的资源超过了当前文件可写字节时
         if (len + blank > mappedFile.getFileSize() - mappedFile.getWrotePosition()) {
             if (blank < MIN_BLANK_LEN) {
                 logger.error("Blank {} should ge {}", blank, MIN_BLANK_LEN);
                 return -1;
             } else {
+                // 申请一个当前文件剩余字节的大小的 bytebuffer
                 ByteBuffer byteBuffer = ByteBuffer.allocate(mappedFile.getFileSize() - mappedFile.getWrotePosition());
+                // 写入魔数
                 byteBuffer.putInt(BLANK_MAGIC_CODE);
+                // 写入字节长度，等于当前文件剩余的总大小
                 byteBuffer.putInt(mappedFile.getFileSize() - mappedFile.getWrotePosition());
                 if (mappedFile.appendMessage(byteBuffer.array())) {
                     //need to set the wrote position
@@ -214,6 +224,7 @@ public class MmapFileList {
                     logger.error("Append blank error for {}", storePath);
                     return -1;
                 }
+                // 获取一个新文件
                 mappedFile = getLastMappedFile(0);
                 if (null == mappedFile) {
                     logger.error("Create mapped file for {}", storePath);
@@ -225,12 +236,21 @@ public class MmapFileList {
 
     }
 
+    /**
+     * @param data 待写入的数据，即待追加的日志
+     * @param pos 从 data 字节数组哪个位置开始读取
+     * @param len 待写入的字节数量
+     * @param useBlank 是否使用填充，默认为 true
+     */
     public long append(byte[] data, int pos, int len, boolean useBlank) {
         if (preAppend(len, useBlank) == -1) {
             return -1;
         }
+        // 获取最后一个文件，即当前可写的文件
         MmapFile mappedFile = getLastMappedFile();
+        // 获取当前写入指针
         long currPosition = mappedFile.getFileFromOffset() + mappedFile.getWrotePosition();
+        // 追加消息
         if (!mappedFile.appendMessage(data, pos, len)) {
             logger.error("Append error for {}", storePath);
             return -1;

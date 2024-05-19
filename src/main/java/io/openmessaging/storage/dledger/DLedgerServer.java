@@ -157,6 +157,7 @@ public class DLedgerServer implements DLedgerProtocolHander {
     }
 
     /**
+     * 服务端处理客户端发送的 append 请求, 只适用于 leader
      * Handle the append requests:
      * 1.append the entry to local store
      * 2.submit the future to entry pusher and wait the quorum ack
@@ -169,12 +170,16 @@ public class DLedgerServer implements DLedgerProtocolHander {
     @Override
     public CompletableFuture<AppendEntryResponse> handleAppend(AppendEntryRequest request) throws IOException {
         try {
+            // 如果请求的节点 ID 不是当前处理节点, 则抛出异常
             PreConditions.check(memberState.getSelfId().equals(request.getRemoteId()), DLedgerResponseCode.UNKNOWN_MEMBER, "%s != %s", request.getRemoteId(), memberState.getSelfId());
+            // 如果请求的集群不是当前节点所在的集群，则抛出异常
             PreConditions.check(memberState.getGroup().equals(request.getGroup()), DLedgerResponseCode.UNKNOWN_GROUP, "%s != %s", request.getGroup(), memberState.getGroup());
+            // 如果当前节点不是主节点，只有 leader 可以写入数据, 则抛出异常
             PreConditions.check(memberState.isLeader(), DLedgerResponseCode.NOT_LEADER);
+            // 如果 leader 发生转移, 抛出异常
             PreConditions.check(memberState.getTransferee() == null, DLedgerResponseCode.LEADER_TRANSFERRING);
             long currTerm = memberState.currTerm();
-            if (dLedgerEntryPusher.isPendingFull(currTerm)) {
+            if (dLedgerEntryPusher.isPendingFull(currTerm)) { // 如果预处理队列已经满了，则拒绝客户端请求，返回 LEADER_PENDING_FULL
                 AppendEntryResponse appendEntryResponse = new AppendEntryResponse();
                 appendEntryResponse.setGroup(memberState.getGroup());
                 appendEntryResponse.setCode(DLedgerResponseCode.LEADER_PENDING_FULL.getCode());
@@ -206,6 +211,8 @@ public class DLedgerServer implements DLedgerProtocolHander {
                     throw new DLedgerException(DLedgerResponseCode.REQUEST_WITH_EMPTY_BODYS, "BatchAppendEntryRequest" +
                             " with empty bodys");
                 } else {
+                    // 将请求封装成 DledgerEntry，调用 dLedgerStore 方法追加日志，
+                    // 并且通过使用 dLedgerEntryPusher 的 waitAck 方法同步等待副本节点的复制响应，并最终将结果返回给调用方法
                     DLedgerEntry dLedgerEntry = new DLedgerEntry();
                     dLedgerEntry.setBody(request.getBody());
                     DLedgerEntry resEntry = dLedgerStore.appendAsLeader(dLedgerEntry);

@@ -172,6 +172,8 @@ public class DefaultMmapFile extends ReferenceResource implements MmapFile {
 
     /**
      * Content of data from offset to offset + length will be wrote to file.
+     * 将数据写入到文件中
+     * 如果主节点追加成功（写入到 PageCache)，但同步到从节点过程失败或此时主节点宕机，集群中的数据如何保证一致性
      *
      * @param offset The offset of the subarray to be used.
      * @param length The length of the subarray to be used.
