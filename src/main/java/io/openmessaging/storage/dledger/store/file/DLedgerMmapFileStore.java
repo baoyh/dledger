@@ -647,7 +647,7 @@ public class DLedgerMmapFileStore extends DLedgerStore {
         // 尝试根据待提交序号从从节点查找数据，如果数据不存在，则抛出 DISK_ERROR 错误
         Pair<Long, Integer> posAndSize = getEntryPosAndSize(newCommittedIndex);
         PreConditions.check(posAndSize != null, DLedgerResponseCode.DISK_ERROR);
-        // 更新 committedIndex、committedPos 两个指针，DledgerStore 会定时将已提交指针刷入 checkpoint 文件，达到持久化 commitedIndex 指针的目的
+        // 更新 committedIndex、committedPos 两个指针，DledgerStore 会定时将已提交指针刷入 checkpoint 文件，达到持久化 committedIndex 指针的目的
         this.committedIndex = newCommittedIndex;
         this.committedPos = posAndSize.getKey() + posAndSize.getValue();
     }

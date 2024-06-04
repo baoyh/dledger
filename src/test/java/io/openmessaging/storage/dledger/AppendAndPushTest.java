@@ -117,8 +117,9 @@ public class AppendAndPushTest extends ServerTestHarness {
         AppendEntryRequest appendEntryRequest = new AppendEntryRequest();
         appendEntryRequest.setGroup(group);
         appendEntryRequest.setRemoteId(dLedgerServer0.getMemberState().getSelfId());
-        appendEntryRequest.setBody(new byte[128]);
+        appendEntryRequest.setBody("hello".getBytes());
         CompletableFuture<AppendEntryResponse> future = dLedgerServer0.handleAppend(appendEntryRequest);
+        dLedgerServer0.handleAppend(appendEntryRequest);
         Assertions.assertTrue(future instanceof AppendFuture);
         future.whenComplete((x, ex) -> {
             sendSuccess.set(true);
@@ -145,9 +146,9 @@ public class AppendAndPushTest extends ServerTestHarness {
         Assertions.assertTrue(sendSuccess.get());
 
         Assertions.assertEquals(0, dLedgerServer0.getdLedgerStore().getLedgerBeginIndex());
-        Assertions.assertEquals(1, dLedgerServer0.getdLedgerStore().getLedgerEndIndex());
+        Assertions.assertEquals(2, dLedgerServer0.getdLedgerStore().getLedgerEndIndex());
         Assertions.assertEquals(0, dLedgerServer1.getdLedgerStore().getLedgerBeginIndex());
-        Assertions.assertEquals(1, dLedgerServer1.getdLedgerStore().getLedgerEndIndex());
+        Assertions.assertEquals(2, dLedgerServer1.getdLedgerStore().getLedgerEndIndex());
     }
 
     @Test

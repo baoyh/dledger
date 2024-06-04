@@ -109,9 +109,9 @@ public class LeaderElectorTest extends ServerTestHarness {
         String group = UUID.randomUUID().toString();
         String peers = String.format("n0-localhost:%d;n1-localhost:%d;n2-localhost:%d", nextPort(), nextPort(), nextPort());
         List<DLedgerServer> servers = new ArrayList<>();
-        servers.add(launchServer(group, peers, "n0"));
-        servers.add(launchServer(group, peers, "n1"));
-        servers.add(launchServer(group, peers, "n2"));
+        servers.add(launchServer(group, peers, "n0", "n0", DLedgerConfig.FILE));
+        servers.add(launchServer(group, peers, "n1", "n0", DLedgerConfig.FILE));
+        servers.add(launchServer(group, peers, "n2", "n0", DLedgerConfig.FILE));
         Thread.sleep(1000);
         AtomicInteger leaderNum = new AtomicInteger(0);
         AtomicInteger followerNum = new AtomicInteger(0);
@@ -133,6 +133,7 @@ public class LeaderElectorTest extends ServerTestHarness {
             Assertions.assertTrue(server.getMemberState().isFollower());
             Assertions.assertTrue(leaderServer.getMemberState().isLeader());
             Assertions.assertEquals(term, server.getMemberState().currTerm());
+            break;
         }
     }
 

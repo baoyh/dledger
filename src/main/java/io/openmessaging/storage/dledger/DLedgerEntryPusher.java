@@ -68,7 +68,7 @@ public class DLedgerEntryPusher {
     private Map<Long /* term */, ConcurrentMap<String /* node id */, Long /* entry index */>> peerWaterMarksByTerm = new ConcurrentHashMap<>();
 
     /**
-     * 用于存放追加请求的响应结果
+     * 用于存放客户端发起的追加请求的响应结果
      */
     private Map<Long /* term */, ConcurrentMap<Long /* entry index */, TimeoutFuture<AppendEntryResponse>>> pendingAppendResponsesByTerm = new ConcurrentHashMap<>();
 
@@ -79,7 +79,7 @@ public class DLedgerEntryPusher {
     /**
      * 主节点日志请求转发器，向从节点复制消息等
      */
-    private Map<String, EntryDispatcher> dispatcherMap = new HashMap<>();
+    private Map<String /* node id */, EntryDispatcher> dispatcherMap = new HashMap<>();
 
     public DLedgerEntryPusher(DLedgerConfig dLedgerConfig, MemberState memberState, DLedgerStore dLedgerStore,
                               DLedgerRpcService dLedgerRpcService) {
@@ -356,7 +356,7 @@ public class DLedgerEntryPusher {
     }
 
     /**
-     * 日志转发线程，当前节点为主节点时追加
+     * 日志转发线程，当前节点为主节点时追加, 每个节点都会有整个集群内节点数量 - 1 个 EntryDispatcher 线程(自身除外)
      * APPEND：将日志条目追加到从节点
      * COMPARE：如果 Leader 发生变化，新的 Leader 需要与他的从节点的日志条目进行比较，以便截断从节点多余的数据
      * TRUNCATE：如果 Leader 通过索引完成日志对比，则 Leader 将发送TRUNCATE 给它的从节点
@@ -594,11 +594,13 @@ public class DLedgerEntryPusher {
                 if (type.get() != PushEntryRequest.Type.APPEND) {
                     break;
                 }
-                // writeIndex 表示当前追加到从该节点的序号
+                // writeIndex 表示当前追加到从节点的序号
                 // 通常情况下主节点向从节点发送 append 请求时，会附带主节点的已提交指针
                 // 但如果 append 请求不那么频繁，writeIndex 大于 leaderEndIndex 时（由于 pending 请求超过其 pending 请求的队列长度（默认为 1w)时，会阻止数据的追加
                 // 此时有可能出现 writeIndex 大于 leaderEndIndex 的情况，此时单独发送 COMMIT 请求
                 if (writeIndex > dLedgerStore.getLedgerEndIndex()) {
+                    // 经测试, 如果 client 没有再发送新的数据, 依然会不停执行 doCommit , 即便 follower 已经都完成了提交
+//                    System.out.printf("writeIndex is %s and endIndex is %S%n", writeIndex, dLedgerStore.getLedgerEndIndex());
                     doCommit();
                     doCheckAppendResponse();
                     break;
@@ -771,7 +773,7 @@ public class DLedgerEntryPusher {
                         && type.get() != PushEntryRequest.Type.TRUNCATE) {
                     break;
                 }
-                // 如果已比较索引 和 ledgerEndIndex 都为 -1 ，表示一个新的 DLedger 集群，则直接跳出
+                // 如果已比较索引 和 ledgerEndIndex 都为 -1 ，表示一个新的 DLedger 集群，同时没有新的消息写入, 则直接跳出
                 if (compareIndex == -1 && dLedgerStore.getLedgerEndIndex() == -1) {
                     break;
                 }
@@ -1042,7 +1044,7 @@ public class DLedgerEntryPusher {
                 future.complete(buildResponse(request, DLedgerResponseCode.SUCCESS.getCode()));
                 dLedgerStore.updateCommittedIndex(request.getTerm(), request.getCommitIndex());
             } catch (Throwable t) {
-                logger.error("[HandleDoTruncate] truncateIndex={}", truncateIndex, t);
+                logger.error("[HandleDoTruncate] t runcateIndex={}", truncateIndex, t);
                 future.complete(buildResponse(request, DLedgerResponseCode.INCONSISTENT_STATE.getCode()));
             }
             return future;

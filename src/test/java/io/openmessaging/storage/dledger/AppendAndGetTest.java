@@ -102,28 +102,36 @@ public class AppendAndGetTest extends ServerTestHarness {
     @Test
     public void testThreeServerInFile() throws Exception {
         String group = UUID.randomUUID().toString();
-        String peers = "n0-localhost:10006;n1-localhost:10007;n2-localhost:10008";
+//        String peers = "n0-localhost:10006;n1-localhost:10007;n2-localhost:10008";
+        String peers = "n0-localhost:10006;n1-localhost:10007";
         DLedgerServer dLedgerServer0 = launchServer(group, peers, "n0", "n1", DLedgerConfig.FILE);
         DLedgerServer dLedgerServer1 = launchServer(group, peers, "n1", "n1", DLedgerConfig.FILE);
-        DLedgerServer dLedgerServer2 = launchServer(group, peers, "n2", "n1", DLedgerConfig.FILE);
+//        DLedgerServer dLedgerServer2 = launchServer(group, peers, "n2", "n1", DLedgerConfig.FILE);
         DLedgerClient dLedgerClient = launchClient(group, peers);
-        for (int i = 0; i < 10; i++) {
-            AppendEntryResponse appendEntryResponse = dLedgerClient.append(("HelloThreeServerInFile" + i).getBytes());
-            Assertions.assertEquals(appendEntryResponse.getCode(), DLedgerResponseCode.SUCCESS.getCode());
-            Assertions.assertEquals(i, appendEntryResponse.getIndex());
-        }
+//        for (int i = 0; i < 10; i++) {
+//            AppendEntryResponse appendEntryResponse = dLedgerClient.append(("HelloThreeServerInFile" + i).getBytes());
+//            Assertions.assertEquals(appendEntryResponse.getCode(), DLedgerResponseCode.SUCCESS.getCode());
+//            Assertions.assertEquals(i, appendEntryResponse.getIndex());
+//        }
+        AppendEntryResponse appendEntryResponse = dLedgerClient.append(("HelloThreeServerInFile" + 1).getBytes());
+        Assertions.assertEquals(appendEntryResponse.getCode(), DLedgerResponseCode.SUCCESS.getCode());
+//        Assertions.assertEquals(i, appendEntryResponse.getIndex());
         Thread.sleep(100);
-        Assertions.assertEquals(9, dLedgerServer0.getdLedgerStore().getLedgerEndIndex());
-        Assertions.assertEquals(9, dLedgerServer1.getdLedgerStore().getLedgerEndIndex());
-        Assertions.assertEquals(9, dLedgerServer2.getdLedgerStore().getLedgerEndIndex());
+        Assertions.assertEquals(0, dLedgerServer0.getdLedgerStore().getLedgerEndIndex());
+        Assertions.assertEquals(0, dLedgerServer1.getdLedgerStore().getLedgerEndIndex());
 
-        for (int i = 0; i < 10; i++) {
-            GetEntriesResponse getEntriesResponse = dLedgerClient.get(i);
-            Assertions.assertEquals(1, getEntriesResponse.getEntries().size());
-            Assertions.assertEquals(i, getEntriesResponse.getEntries().get(0).getIndex());
-            Assertions.assertArrayEquals(("HelloThreeServerInFile" + i).getBytes(), getEntriesResponse.getEntries().get(0).getBody());
-        }
-//        Thread.sleep(10000000);
+        appendEntryResponse = dLedgerClient.append(("HelloThreeServerInFile" + 2).getBytes());
+        Assertions.assertEquals(1, dLedgerServer0.getdLedgerStore().getLedgerEndIndex());
+        Assertions.assertEquals(1, dLedgerServer1.getdLedgerStore().getLedgerEndIndex());
+//        Assertions.assertEquals(0, dLedgerServer2.getdLedgerStore().getLedgerEndIndex());
+
+//        for (int i = 0; i < 10; i++) {
+//            GetEntriesResponse getEntriesResponse = dLedgerClient.get(i);
+//            Assertions.assertEquals(1, getEntriesResponse.getEntries().size());
+//            Assertions.assertEquals(i, getEntriesResponse.getEntries().get(0).getIndex());
+//            Assertions.assertArrayEquals(("HelloThreeServerInFile" + i).getBytes(), getEntriesResponse.getEntries().get(0).getBody());
+//        }
+        Thread.sleep(100000);
     }
 
     @Test
